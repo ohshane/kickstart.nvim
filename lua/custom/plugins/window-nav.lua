@@ -40,4 +40,8 @@ function M.map(modes, opts)
   end
 end
 
+-- Normal mode only: terminal buffers keep their native C-hjkl, and tmux's
+-- `is_vim` check already handles panes running other programs.
+M.map 'n'
+
 return M

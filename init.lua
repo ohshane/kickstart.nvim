@@ -234,13 +234,7 @@ do
   -- vim.keymap.set('n', '<up>', '<cmd>echo "Use k to move!!"<CR>')
   -- vim.keymap.set('n', '<down>', '<cmd>echo "Use j to move!!"<CR>')
 
-  -- Keybinds to make split navigation easier.
-  --  Use CTRL+<hjkl> to switch between windows
-  --
-  --  See `:help wincmd` for a list of all window commands
-  --  At a window edge these cross over into the neighbouring tmux pane instead of
-  --  doing nothing. Terminal buffers keep their own C-hjkl behavior.
-  require('custom.window-nav').map 'n'
+  -- C-hjkl split/tmux-pane navigation is set up in lua/custom/plugins/window-nav.lua.
 
   -- NOTE: Some terminals have colliding keymaps or are not able to send distinct keycodes
   -- vim.keymap.set("n", "<C-S-h>", "<C-w>H", { desc = "Move window to the left" })

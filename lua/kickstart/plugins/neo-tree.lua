@@ -9,8 +9,15 @@ vim.pack.add {
 
 vim.keymap.set('n', '\\', '<Cmd>Neotree reveal<CR>', { desc = 'NeoTree reveal', silent = true })
 
-local events = require('neo-tree.events')
-events.fire_event(events.GIT_EVENT)
+-- Refresh git status in the tree when coming back from another tmux pane or a
+-- terminal; an agent or a git command may have changed things meanwhile.
+-- (use_libuv_file_watcher below only covers file creation/deletion, not git state.)
+vim.api.nvim_create_autocmd({ 'FocusGained', 'TermLeave' }, {
+  callback = function()
+    local ok, events = pcall(require, 'neo-tree.events')
+    if ok then events.fire_event(events.GIT_EVENT) end
+  end,
+})
 
 require('neo-tree').setup {
   filesystem = {
