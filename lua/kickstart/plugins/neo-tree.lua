@@ -9,8 +9,12 @@ vim.pack.add {
 
 vim.keymap.set('n', '\\', '<Cmd>Neotree reveal<CR>', { desc = 'NeoTree reveal', silent = true })
 
+local events = require('neo-tree.events')
+events.fire_event(events.GIT_EVENT)
+
 require('neo-tree').setup {
   filesystem = {
+    use_libuv_file_watcher = true,
     window = {
       mappings = {
         ['\\'] = 'close_window',
