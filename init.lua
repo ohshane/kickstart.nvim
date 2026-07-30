@@ -173,7 +173,7 @@ do
   vim.o.confirm = true
 
   -- Cursor style
-  vim.o.guicursor = "a:block"
+  vim.o.guicursor = 'a:block'
 
   -- Set indentation options
   vim.o.tabstop = 4
@@ -593,6 +593,18 @@ do
     { desc = '[S]earch [/] in Open Files' }
   )
 
+  -- Narrow live grep to the current file only (reads from disk, so save first)
+  vim.keymap.set('n', '<leader>sG', function()
+    local file = vim.fn.expand '%:p'
+    if file == '' then
+      return vim.notify('No file in this buffer', vim.log.levels.WARN)
+    end
+    builtin.live_grep {
+      search_dirs = { file },
+      prompt_title = 'Live Grep in Current File',
+    }
+  end, { desc = '[S]earch by [G]rep in current file' })
+
   -- Shortcut for searching your Neovim configuration files
   vim.keymap.set('n', '<leader>sn', function() builtin.find_files { cwd = vim.fn.stdpath 'config', follow = true } end, { desc = '[S]earch [N]eovim files' })
 end
@@ -705,7 +717,7 @@ do
   --  See `:help lsp-config` for information about keys and how to configure
   ---@type table<string, vim.lsp.Config>
   local servers = {
-    -- clangd = {},
+    clangd = {},
     gopls = {},
     pyright = {},
     -- rust_analyzer = {},
@@ -715,6 +727,9 @@ do
     --
     -- But for many setups, the LSP (`ts_ls`) will work just fine
     ts_ls = {},
+
+    -- Language server, formatter and linter for Markdown, Quarto and R Markdown.
+    panache = {},
 
     stylua = {}, -- Used to format Lua code
 
@@ -796,6 +811,12 @@ end
 do
   -- [[ Formatting ]]
   vim.pack.add { gh 'stevearc/conform.nvim' }
+
+  -- prettierd is a daemon, so it avoids paying Node's startup cost on every format;
+  -- prettier is the fallback when the daemon is unavailable. `stop_after_first`
+  -- makes conform take whichever it finds first rather than running both.
+  local prettier = { 'prettierd', 'prettier', stop_after_first = true }
+
   require('conform').setup {
     notify_on_error = false,
     format_on_save = function(bufnr)
@@ -815,12 +836,36 @@ do
     },
     -- You can also specify external formatters in here.
     formatters_by_ft = {
+      -- Required, not optional: lua_ls has formatting disabled above, so without an
+      -- entry here nothing formats Lua at all -- `lsp_format = 'fallback'` has no
+      -- LSP left to fall back to. Style comes from .stylua.toml.
+      lua = { 'stylua' },
+      -- Style is set in the `formatters` table below, not in a ~/.clang-format file.
+      c = { 'clang-format' },
+      cpp = { 'clang-format' },
       -- rust = { 'rustfmt' },
       -- Conform can also run multiple formatters sequentially
-      -- python = { "isort", "black" },
+      python = { 'isort', 'black' },
       --
-      -- You can use 'stop_after_first' to run the first available formatter from the list
-      -- javascript = { "prettierd", "prettier", stop_after_first = true },
+      -- Prettier. json, css, scss, less, html and yaml are the ones that matter most:
+      -- no enabled language server formats them, so without these entries <leader>f
+      -- does nothing at all in those files. ts/tsx are listed too, taking precedence
+      -- over ts_ls, so that the whole JS/TS family formats identically.
+      --
+      -- markdown is deliberately absent even though Prettier handles it: panache
+      -- already formats markdown, quarto and rmd over LSP, and listing it here would
+      -- silently take that away.
+      javascript = prettier,
+      javascriptreact = prettier,
+      typescript = prettier,
+      typescriptreact = prettier,
+      json = prettier,
+      jsonc = prettier,
+      css = prettier,
+      scss = prettier,
+      less = prettier,
+      html = prettier,
+      yaml = prettier,
     },
   }
 
