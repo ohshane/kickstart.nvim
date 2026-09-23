@@ -175,11 +175,78 @@ do
   -- Cursor style
   vim.o.guicursor = 'a:block'
 
-  -- Set indentation options
+  -- Indentation. These are the fallback for filetypes not listed in the table
+  -- below; nvim's own defaults (tabstop=8, noexpandtab) would otherwise leave
+  -- lua/c/js on 8-wide hard tabs, since nvim ships no indent ftplugin for them.
   vim.o.tabstop = 4
   vim.o.shiftwidth = 4
   vim.o.softtabstop = 4
   vim.o.expandtab = true
+
+  -- Indent style per filetype, as { width, 'spaces' | 'tabs' }. Each entry must
+  -- match what that filetype's formatter in SECTION 7 actually emits, otherwise
+  -- you type at one width and <leader>f snaps the file to another:
+  --   stylua       -> 2 spaces (.stylua.toml indent_width)
+  --   prettier     -> 2 spaces (its own default; this config ships no .prettierrc)
+  --   black        -> 4 spaces
+  --   clang-format -> 4 spaces (via IndentWidth in conform's `formatters` table)
+  --   gofmt        -> tabs, always, and not configurable
+  -- make and gitconfig are tabs because both formats require real tab characters
+  -- to be valid; spaces there silently produce a broken file.
+  local indent_by_ft = {
+    lua = { 2, 'spaces' },
+    javascript = { 2, 'spaces' },
+    javascriptreact = { 2, 'spaces' },
+    typescript = { 2, 'spaces' },
+    typescriptreact = { 2, 'spaces' },
+    json = { 2, 'spaces' },
+    jsonc = { 2, 'spaces' },
+    css = { 2, 'spaces' },
+    scss = { 2, 'spaces' },
+    less = { 2, 'spaces' },
+    html = { 2, 'spaces' },
+    yaml = { 2, 'spaces' },
+    markdown = { 2, 'spaces' },
+    python = { 4, 'spaces' },
+    c = { 4, 'spaces' },
+    cpp = { 4, 'spaces' },
+    sh = { 4, 'spaces' },
+    bash = { 4, 'spaces' },
+    go = { 4, 'tabs' },
+    make = { 4, 'tabs' },
+    gitconfig = { 4, 'tabs' },
+  }
+
+  -- Registered after the runtime's own ftplugin autocmd, so this wins over the
+  -- defaults nvim ships (e.g. markdown's expandtab ts=4).
+  --
+  -- It also -- unhelpfully -- wins over guess-indent. FileType fires *nested
+  -- inside* BufReadPost (filetype detection lives in $VIMRUNTIME/plugin, sourced
+  -- after init.lua, so it registers behind guess-indent's own BufReadPost hook).
+  -- The real order is:
+  --   BufReadPost -> guess-indent detects -> filetypedetect -> FileType -> here
+  -- meaning a naive assignment below would silently discard what guess-indent
+  -- just detected, and every C file would be forced to 4 even when it is
+  -- consistently 2. So re-run the detection afterwards and let content win.
+  vim.api.nvim_create_autocmd('FileType', {
+    desc = 'Set indent width and tab/space style per filetype',
+    callback = function(args)
+      local style = indent_by_ft[args.match]
+      if not style then return end
+      local width, kind = style[1], style[2]
+      local bo = vim.bo[args.buf]
+      bo.expandtab = kind == 'spaces'
+      bo.tabstop = width
+      bo.shiftwidth = width
+      -- For tabs, softtabstop=0 keeps <Tab> inserting one real tab rather than
+      -- a run of spaces that happens to be `width` wide.
+      bo.softtabstop = kind == 'spaces' and width or 0
+
+      -- Only for buffers with real content to inspect: on an empty or brand-new
+      -- buffer detection finds nothing and leaves the defaults just set intact.
+      if vim.api.nvim_buf_line_count(args.buf) > 1 then pcall(function() require('guess-indent').set_from_buffer(args.buf, true, true) end) end
+    end,
+  })
 end
 
 -- ============================================================
@@ -596,9 +663,7 @@ do
   -- Narrow live grep to the current file only (reads from disk, so save first)
   vim.keymap.set('n', '<leader>sG', function()
     local file = vim.fn.expand '%:p'
-    if file == '' then
-      return vim.notify('No file in this buffer', vim.log.levels.WARN)
-    end
+    if file == '' then return vim.notify('No file in this buffer', vim.log.levels.WARN) end
     builtin.live_grep {
       search_dirs = { file },
       prompt_title = 'Live Grep in Current File',
@@ -731,7 +796,11 @@ do
     -- Language server, formatter and linter for Markdown, Quarto and R Markdown.
     panache = {},
 
-    stylua = {}, -- Used to format Lua code
+    -- NOTE: stylua does NOT belong here, it lives in `ensure_installed` below.
+    -- Everything in this table gets `vim.lsp.enable()`d, and nvim-lspconfig ships a
+    -- real `lsp/stylua.lua` (`stylua --lsp`), so listing it here starts a second
+    -- formatting-capable client on every Lua buffer. That flips `formatexpr` to
+    -- vim.lsp.formatexpr(), which stops `gq` from rewrapping long comments.
 
     -- Special Lua Config, as recommended by neovim help docs
     lua_ls = {
@@ -793,7 +862,10 @@ do
   -- You can press `g?` for help in this menu.
   local ensure_installed = vim.tbl_keys(servers or {})
   vim.list_extend(ensure_installed, {
-    -- You can add other tools here that you want Mason to install
+    -- You can add other tools here that you want Mason to install.
+    -- Formatters and linters go here, not in `servers` above: this list only feeds
+    -- mason, whereas `servers` is also handed to vim.lsp.enable().
+    'stylua', -- Used to format Lua code
   })
 
   require('mason-tool-installer').setup { ensure_installed = ensure_installed }
@@ -840,7 +912,8 @@ do
       -- entry here nothing formats Lua at all -- `lsp_format = 'fallback'` has no
       -- LSP left to fall back to. Style comes from .stylua.toml.
       lua = { 'stylua' },
-      -- Style is set in the `formatters` table below, not in a ~/.clang-format file.
+      -- Indent width comes from the `formatters` table below, since this config
+      -- ships no ~/.clang-format. A project's own .clang-format still wins.
       c = { 'clang-format' },
       cpp = { 'clang-format' },
       -- rust = { 'rustfmt' },
@@ -866,6 +939,24 @@ do
       less = prettier,
       html = prettier,
       yaml = prettier,
+    },
+    formatters = {
+      -- Without this, clang-format finds no .clang-format anywhere, falls back to
+      -- plain LLVM style and indents 2 -- disagreeing with the 4 that c/cpp buffers
+      -- get in SECTION 1, so <leader>f would re-indent the entire file.
+      --
+      -- Note `--fallback-style` cannot do this job: it only accepts a named style
+      -- ("LLVM", "Google", ...) and rejects an inline `{IndentWidth: 4}` block.
+      ['clang-format'] = {
+        prepend_args = function(_, ctx)
+          -- A project that ships its own .clang-format owns its style, so pass
+          -- nothing and let clang-format discover the file by walking up itself.
+          if vim.fs.find({ '.clang-format', '_clang-format' }, { path = ctx.dirname, upward = true })[1] then return {} end
+          -- Otherwise mirror the buffer, so the formatter and the editor cannot
+          -- disagree -- including when guess-indent detected a width of its own.
+          return { ('--style={BasedOnStyle: LLVM, IndentWidth: %d}'):format(ctx.shiftwidth) }
+        end,
+      },
     },
   }
 
@@ -971,6 +1062,13 @@ do
   local parsers = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' }
   require('nvim-treesitter').install(parsers)
 
+  -- Languages whose bundled indent ftplugin beats the treesitter indents query.
+  -- Python's ftplugin sets `indentkeys` to re-indent on `:`, `elif` and `except`,
+  -- and its python#GetIndent() then dedents the line. The treesitter indentexpr
+  -- gets asked the same question but returns the *enclosing block's* indent, so
+  -- typing `else:` under an indented `pass` leaves it stuck at that indent.
+  local ts_indent_exclude = { python = true }
+
   ---@param buf integer
   ---@param language string
   local function treesitter_try_attach(buf, language)
@@ -988,8 +1086,11 @@ do
     -- in case there is no indent query, the indentexpr will fallback to the vim's built in one
     local has_indent_query = vim.treesitter.query.get(language, 'indents') ~= nil
 
-    -- Enable treesitter based indentation
-    if has_indent_query then vim.bo.indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()" end
+    -- Enable treesitter based indentation.
+    -- NOTE: indexed by `buf`, not plain `vim.bo`. This can run from an install
+    -- callback long after the FileType event, by which point the current buffer
+    -- may be something else entirely.
+    if has_indent_query and not ts_indent_exclude[language] then vim.bo[buf].indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()" end
   end
 
   local available_parsers = require('nvim-treesitter').get_available()
